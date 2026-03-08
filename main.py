@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime
 
 import config
 from src.alerts import send_telegram_alert
@@ -15,11 +16,73 @@ from src.risk import check_daily_limits
 from src.signals import generate_signals
 from src.weather import get_forecasts_for_cities
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+_LOG_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+logging.basicConfig(level=logging.INFO, format=_LOG_FMT)
 logger = logging.getLogger(__name__)
+
+
+def _setup_file_logging() -> None:
+    """Add a daily rotating file handler so every run is persisted to disk."""
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        log_file = os.path.join(LOG_DIR, f"bot_{datetime.now().strftime('%Y%m%d')}.log")
+        fh = logging.FileHandler(log_file)
+        fh.setFormatter(logging.Formatter(_LOG_FMT))
+        logging.getLogger().addHandler(fh)
+        logger.debug("File logging active: %s", log_file)
+    except OSError as exc:
+        logger.warning("Could not set up file logging: %s", exc)
+
+
+def _write_scan_summary(signals: list, dry_run: bool) -> None:
+    """Print and write a structured scan summary with per-signal simulated P&L.
+
+    Simulated P&L per signal = edge × size (expected value of the trade).
+    This is logged to stdout (visible in Railway dashboard) and to a timestamped
+    file in LOG_DIR for local / volume-backed inspection.
+    """
+    mode = "DRY-RUN" if dry_run else "LIVE"
+    now = datetime.now()
+    sep = "=" * 62
+
+    lines = [
+        sep,
+        f"  SCAN SUMMARY  {now.strftime('%Y-%m-%d %H:%M')}  [{mode}]",
+        sep,
+        f"  Signals found: {len(signals)}",
+        "",
+        f"  {'Side':<4}  {'Edge':>7}  {'Size':>6}  {'Exp P&L':>8}  Question",
+        f"  {'-'*4}  {'-'*7}  {'-'*6}  {'-'*8}  {'-'*40}",
+    ]
+
+    total_expected_pnl = 0.0
+    for sig in signals:
+        exp_pnl = sig.edge * sig.recommended_size
+        total_expected_pnl += exp_pnl
+        lines.append(
+            f"  {sig.recommended_side:<4}  {sig.edge:>+7.1%}  "
+            f"${sig.recommended_size:>5.2f}  ${exp_pnl:>+7.2f}  "
+            f"{sig.question[:48]}"
+        )
+
+    lines += [
+        f"  {'-'*58}",
+        f"  Total expected P&L this run: ${total_expected_pnl:+.2f}",
+        sep,
+    ]
+
+    summary = "\n".join(lines)
+    logger.info("\n%s", summary)
+
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        fname = os.path.join(LOG_DIR, f"scan_{now.strftime('%Y%m%d_%H%M')}.log")
+        with open(fname, "w") as f:
+            f.write(summary + "\n")
+    except OSError as exc:
+        logger.debug("Could not write summary file: %s", exc)
 
 _shutdown = False
 
@@ -84,6 +147,7 @@ def run_scan(dry_run: bool, clob_client) -> None:
 
     # 3. Generate signals
     signals = generate_signals(forecasts, markets)
+    _write_scan_summary(signals, dry_run)
     if not signals:
         logger.info("No signals above threshold this cycle.")
         return
@@ -146,6 +210,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
+    _setup_file_logging()
     logger.info("Bot starting — dry_run=%s once=%s", args.dry_run, args.once)
 
     # Ensure database is ready

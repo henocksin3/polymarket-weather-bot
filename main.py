@@ -16,7 +16,10 @@ from src.risk import check_daily_limits
 from src.signals import generate_signals
 from src.weather import get_forecasts_for_cities
 
-LOG_DIR = os.getenv("LOG_DIR", "logs")
+# LOG_DIR defaults to DATA_DIR/logs when a Railway Volume is mounted (DATA_DIR=/data),
+# falling back to a local "logs/" directory for development.
+_data_dir = os.getenv("DATA_DIR", "")
+LOG_DIR = os.getenv("LOG_DIR", os.path.join(_data_dir, "logs") if _data_dir else "logs")
 _LOG_FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 logging.basicConfig(level=logging.INFO, format=_LOG_FMT)

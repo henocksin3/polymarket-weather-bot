@@ -31,8 +31,9 @@ CITIES = {
     "london":   {"lat": 51.5074, "lon": -0.1278},
 }
 
-# Database
-DB_PATH = "db/trades.db"
+# Persistent storage — override with DATA_DIR=/data when a Railway Volume is mounted
+_DATA_DIR = os.getenv("DATA_DIR", "")
+DB_PATH = os.path.join(_DATA_DIR, "trades.db") if _DATA_DIR else "db/trades.db"
 
 # Polymarket API endpoints
 GAMMA_API_BASE = "https://gamma-api.polymarket.com"

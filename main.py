@@ -10,8 +10,9 @@ from datetime import datetime
 
 import config
 from src.alerts import send_telegram_alert
-from src.database import create_tables, log_trade
+from src.database import create_tables, get_accuracy_stats, log_trade
 from src.markets import fetch_weather_markets
+from src.resolver import resolve_pending_trades
 from src.risk import check_daily_limits
 from src.signals import generate_signals
 from src.weather import get_forecasts_for_cities
@@ -73,9 +74,20 @@ def _write_scan_summary(signals: list, dry_run: bool) -> None:
             f"{sig.question[:48]}"
         )
 
+    stats = get_accuracy_stats(config.DB_PATH)
+    if stats["total_resolved"] > 0:
+        accuracy_line = (
+            f"  Accuracy: {stats['hits']}/{stats['total_resolved']} "
+            f"({stats['hit_rate']:.0%}) | "
+            f"Realised P&L: ${stats['total_pnl']:+.2f}"
+        )
+    else:
+        accuracy_line = "  Accuracy: no resolved trades yet"
+
     lines += [
         f"  {'-'*58}",
-        f"  Total expected P&L this run: ${total_expected_pnl:+.2f}",
+        f"  Expected P&L this run: ${total_expected_pnl:+.2f}",
+        accuracy_line,
         sep,
     ]
 
@@ -134,8 +146,14 @@ def _get_clob_client():
 
 
 def run_scan(dry_run: bool, clob_client) -> None:
-    """Execute one full scan cycle: fetch → signal → trade → alert."""
+    """Execute one full scan cycle: resolve → fetch → signal → trade → alert."""
     logger.info("=== Scan cycle starting (dry_run=%s) ===", dry_run)
+
+    # 0. Resolve any previously logged trades that have now settled
+    try:
+        resolve_pending_trades(config.DB_PATH)
+    except Exception as exc:
+        logger.warning("Resolver error (non-fatal): %s", exc)
 
     # 1. Fetch weather forecasts
     logger.info("Fetching weather forecasts for %d cities…", len(config.CITIES))

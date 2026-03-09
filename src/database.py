@@ -26,10 +26,14 @@ CREATE TABLE IF NOT EXISTS trades (
     order_id      TEXT    DEFAULT '',
     dry_run       INTEGER DEFAULT 0,  -- 1 if dry run
     resolved      INTEGER DEFAULT 0,  -- 1 once market settles
+    hit           INTEGER DEFAULT NULL, -- 1=correct, 0=wrong, NULL=pending
     pnl           REAL    DEFAULT 0.0,
     created_at    TEXT    NOT NULL
 )
 """
+
+# Migration: add 'hit' column to existing databases that predate this schema
+_MIGRATE_HIT_COLUMN_SQL = "ALTER TABLE trades ADD COLUMN hit INTEGER DEFAULT NULL"
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -38,7 +42,7 @@ def _connect(db_path: str) -> sqlite3.Connection:
 
 
 def create_tables(db_path: str) -> None:
-    """Create the trades table if it doesn't already exist.
+    """Create the trades table if it doesn't already exist, and run migrations.
 
     Args:
         db_path: Path to the SQLite database file.
@@ -46,6 +50,12 @@ def create_tables(db_path: str) -> None:
     con = _connect(db_path)
     try:
         con.execute(_CREATE_TRADES_SQL)
+        # Migration: add 'hit' column if missing (databases created before this column existed)
+        try:
+            con.execute(_MIGRATE_HIT_COLUMN_SQL)
+            logger.info("Migrated trades table: added 'hit' column")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         con.commit()
         logger.debug("Database tables verified: %s", db_path)
     finally:
@@ -147,6 +157,90 @@ def get_today_trades(db_path: str) -> list[dict[str, Any]]:
     except sqlite3.OperationalError as exc:
         logger.debug("get_today_trades: %s", exc)
         return []
+
+
+def get_unresolved_trades(db_path: str) -> list[dict[str, Any]]:
+    """Return all trades that have not yet been resolved.
+
+    Returns:
+        List of dicts with keys: id, condition_id, side, price, size, question.
+    """
+    try:
+        con = _connect(db_path)
+        con.row_factory = sqlite3.Row
+        try:
+            rows = con.execute(
+                "SELECT id, condition_id, side, price, size, question "
+                "FROM trades WHERE resolved = 0 ORDER BY id"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            con.close()
+    except sqlite3.OperationalError as exc:
+        logger.debug("get_unresolved_trades: %s", exc)
+        return []
+
+
+def mark_trade_resolved(
+    db_path: str,
+    trade_id: int,
+    hit: bool,
+    pnl: float,
+) -> None:
+    """Mark a trade as resolved with its actual outcome.
+
+    Args:
+        db_path:  Path to the SQLite database file.
+        trade_id: Row ID of the trade to update.
+        hit:      True if the forecast was correct (our side won).
+        pnl:      Actual profit/loss in USDC (positive = profit).
+    """
+    con = _connect(db_path)
+    try:
+        con.execute(
+            "UPDATE trades SET resolved = 1, hit = ?, pnl = ? WHERE id = ?",
+            (int(hit), round(pnl, 4), trade_id),
+        )
+        con.commit()
+        logger.debug("Trade #%d marked resolved: hit=%s pnl=%.2f", trade_id, hit, pnl)
+    finally:
+        con.close()
+
+
+def get_accuracy_stats(db_path: str) -> dict[str, Any]:
+    """Return cumulative accuracy statistics across all resolved trades.
+
+    Returns:
+        Dict with keys: total_resolved, hits, misses, hit_rate, total_pnl.
+    """
+    try:
+        con = _connect(db_path)
+        try:
+            row = con.execute(
+                """
+                SELECT
+                    COUNT(*)                          AS total_resolved,
+                    COALESCE(SUM(hit), 0)             AS hits,
+                    COALESCE(SUM(pnl), 0.0)           AS total_pnl
+                FROM trades
+                WHERE resolved = 1
+                """
+            ).fetchone()
+            total = row[0] or 0
+            hits = row[1] or 0
+            total_pnl = row[2] or 0.0
+            return {
+                "total_resolved": total,
+                "hits": hits,
+                "misses": total - hits,
+                "hit_rate": hits / total if total else 0.0,
+                "total_pnl": float(total_pnl),
+            }
+        finally:
+            con.close()
+    except sqlite3.OperationalError as exc:
+        logger.debug("get_accuracy_stats: %s", exc)
+        return {"total_resolved": 0, "hits": 0, "misses": 0, "hit_rate": 0.0, "total_pnl": 0.0}
 
 
 def get_total_pnl(db_path: str) -> float:

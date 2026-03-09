@@ -62,7 +62,10 @@ def _write_scan_summary(signals: list, dry_run: bool) -> None:
 
     total_expected_pnl = 0.0
     for sig in signals:
-        exp_pnl = sig.edge * sig.recommended_size
+        if sig.recommended_side == "YES":
+            exp_pnl = sig.edge * sig.recommended_size
+        else:
+            exp_pnl = (1 - sig.market_price) * sig.recommended_size
         total_expected_pnl += exp_pnl
         lines.append(
             f"  {sig.recommended_side:<4}  {sig.edge:>+7.1%}  "

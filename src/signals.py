@@ -127,9 +127,9 @@ def generate_signals(
             market_price = market.outcome_prices[i]
             if market_price <= 0:
                 continue
-            if market_price >= 1:
+            if market_price >= 0.99:
                 logger.debug(
-                    f"Market price {market_price:.0%} at ceiling — no liquidity, skipping "
+                    f"Market price {market_price:.1%} near ceiling — insufficient liquidity, skipping "
                     f"(market {market.market_id}, bucket {i})"
                 )
                 continue

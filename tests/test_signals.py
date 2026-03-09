@@ -195,16 +195,31 @@ class TestGenerateSignals:
         assert abs(signals[0].edge) >= abs(signals[1].edge)
 
     def test_market_price_at_ceiling_skipped(self):
-        """market_price >= 1.0 (no liquidity on other side) → no signal."""
-        forecast = _make_forecast(n_in=0)   # 0% prob → would buy NO, but price=1.0 is ceiling
+        """market_price >= 0.99 (near-ceiling, insufficient NO liquidity) → no signal."""
+        forecast = _make_forecast(n_in=0)
+        for price in [1.0, 0.99, 0.995]:
+            market = _make_market(
+                market_id="m8",
+                question="Will the high temperature in New York City be 10-30°C on March 10, 2026?",
+                outcomes=["10-30°C"],
+                prices=[price],
+            )
+            signals = generate_signals({"new_york": forecast}, [market])
+            assert len(signals) == 0, f"Expected no signal for price={price}"
+
+    def test_market_price_just_below_ceiling_passes(self):
+        """market_price = 0.989 is below threshold — should still be evaluated."""
+        forecast = _make_forecast(n_in=0)  # 0% prob, edge = -0.989, conf=100%
         market = _make_market(
-            market_id="m8",
+            market_id="m8b",
             question="Will the high temperature in New York City be 10-30°C on March 10, 2026?",
             outcomes=["10-30°C"],
-            prices=[1.0],
+            prices=[0.989],
         )
         signals = generate_signals({"new_york": forecast}, [market])
-        assert len(signals) == 0
+        # edge=-98.9%, conf=100% → exceeds MIN_EDGE and MIN_CONFIDENCE → signal emitted
+        assert len(signals) == 1
+        assert signals[0].recommended_side == "NO"
 
     def test_market_date_too_far_ahead_skipped(self):
         """Market date more than 2 days from today → no signal."""

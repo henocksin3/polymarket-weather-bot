@@ -209,7 +209,7 @@ class TestGenerateSignals:
 
     def test_market_price_just_below_ceiling_passes(self):
         """market_price = 0.989 is below threshold — should still be evaluated."""
-        forecast = _make_forecast(n_in=0)  # 0% prob, edge = -0.989, conf=100%
+        forecast = _make_forecast(n_in=3)  # 10% prob, edge = -0.889, conf=100%
         market = _make_market(
             market_id="m8b",
             question="Will the high temperature in New York City be 10-30°C on March 10, 2026?",
@@ -217,7 +217,7 @@ class TestGenerateSignals:
             prices=[0.989],
         )
         signals = generate_signals({"new_york": forecast}, [market])
-        # edge=-98.9%, conf=100% → exceeds MIN_EDGE and MIN_CONFIDENCE → signal emitted
+        # edge=-88.9%, conf=100% → exceeds MIN_EDGE and MIN_CONFIDENCE → signal emitted
         assert len(signals) == 1
         assert signals[0].recommended_side == "NO"
 

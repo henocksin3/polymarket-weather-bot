@@ -163,14 +163,14 @@ def get_unresolved_trades(db_path: str) -> list[dict[str, Any]]:
     """Return all trades that have not yet been resolved.
 
     Returns:
-        List of dicts with keys: id, condition_id, side, price, size, question.
+        List of dicts with keys: id, market_id, condition_id, side, price, size, question.
     """
     try:
         con = _connect(db_path)
         con.row_factory = sqlite3.Row
         try:
             rows = con.execute(
-                "SELECT id, condition_id, side, price, size, question "
+                "SELECT id, market_id, condition_id, side, price, size, question "
                 "FROM trades WHERE resolved = 0 ORDER BY id"
             ).fetchall()
             return [dict(r) for r in rows]

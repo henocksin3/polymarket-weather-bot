@@ -82,50 +82,53 @@ class TestFetchResolution:
     @patch("src.resolver.httpx.Client")
     def test_yes_won(self, mock_client_cls):
         mock_resp = MagicMock()
-        mock_resp.json.return_value = [
-            {"resolved": True, "outcomePrices": json.dumps(["1", "0"])}
-        ]
+        mock_resp.json.return_value = {
+            "closed": True,
+            "outcomePrices": json.dumps(["1", "0"])
+        }
         mock_resp.raise_for_status = MagicMock()
         mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
 
-        resolved, yes_won = _fetch_resolution("0xabc")
+        resolved, yes_won = _fetch_resolution("12345")
         assert resolved is True
         assert yes_won is True
 
     @patch("src.resolver.httpx.Client")
     def test_no_won(self, mock_client_cls):
         mock_resp = MagicMock()
-        mock_resp.json.return_value = [
-            {"resolved": True, "outcomePrices": json.dumps(["0", "1"])}
-        ]
+        mock_resp.json.return_value = {
+            "closed": True,
+            "outcomePrices": json.dumps(["0", "1"])
+        }
         mock_resp.raise_for_status = MagicMock()
         mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
 
-        resolved, yes_won = _fetch_resolution("0xabc")
+        resolved, yes_won = _fetch_resolution("12345")
         assert resolved is True
         assert yes_won is False
 
     @patch("src.resolver.httpx.Client")
     def test_not_resolved(self, mock_client_cls):
         mock_resp = MagicMock()
-        mock_resp.json.return_value = [
-            {"resolved": False, "outcomePrices": json.dumps(["0.7", "0.3"])}
-        ]
+        mock_resp.json.return_value = {
+            "closed": False,
+            "outcomePrices": json.dumps(["0.7", "0.3"])
+        }
         mock_resp.raise_for_status = MagicMock()
         mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
 
-        resolved, yes_won = _fetch_resolution("0xabc")
+        resolved, yes_won = _fetch_resolution("12345")
         assert resolved is False
         assert yes_won is None
 
     @patch("src.resolver.httpx.Client")
     def test_market_not_found_returns_false(self, mock_client_cls):
         mock_resp = MagicMock()
-        mock_resp.json.return_value = []
+        mock_resp.json.return_value = None
         mock_resp.raise_for_status = MagicMock()
         mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
 
-        resolved, yes_won = _fetch_resolution("0xnonexistent")
+        resolved, yes_won = _fetch_resolution("99999")
         assert resolved is False
         assert yes_won is None
 

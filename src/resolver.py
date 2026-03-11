@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 TIMEOUT_SECONDS = 30
 
 
-def _fetch_resolution(condition_id: str) -> tuple[bool, bool | None]:
+def _fetch_resolution(market_id: str) -> tuple[bool, bool | None]:
     """Check whether a market has resolved and which side won.
 
     Args:
-        condition_id: Polymarket condition ID (hex string).
+        market_id: Polymarket market ID.
 
     Returns:
         (resolved, yes_won):
@@ -28,39 +28,40 @@ def _fetch_resolution(condition_id: str) -> tuple[bool, bool | None]:
     """
     try:
         with httpx.Client(timeout=TIMEOUT_SECONDS) as client:
-            response = client.get(
-                f"{GAMMA_API_BASE}/markets",
-                params={"conditionId": condition_id},
-            )
+            response = client.get(f"{GAMMA_API_BASE}/markets/{market_id}")
             response.raise_for_status()
-            data = response.json()
+            raw = response.json()
 
-        markets = data if isinstance(data, list) else data.get("data", [])
-        if not markets:
+        if not raw:
             return False, None
 
-        raw = markets[0]
-        if not raw.get("resolved", False):
-            return False, None
-
+        # Check if market is closed with determined outcome prices
         prices_raw = raw.get("outcomePrices", [])
+        if not raw.get("closed", False):
+            return False, None
         if isinstance(prices_raw, str):
             prices_raw = json.loads(prices_raw)
 
         prices = [float(p) for p in prices_raw]
-        if not prices:
-            return True, None
+        if not prices or len(prices) < 2:
+            return False, None
 
         # outcomePrices[0] corresponds to the first outcome (YES in binary markets).
         # A resolved winning outcome has price 1.0; losers have 0.0.
-        yes_won = prices[0] >= 0.99
-        return True, yes_won
+        # Only consider resolved if we have a clear winner
+        if prices[0] >= 0.99:
+            return True, True
+        elif prices[1] >= 0.99:
+            return True, False
+        else:
+            # Market closed but no clear winner yet
+            return False, None
 
     except httpx.HTTPStatusError as exc:
-        logger.warning("HTTP error checking resolution for %s: %s", condition_id, exc)
+        logger.warning("HTTP error checking resolution for %s: %s", market_id, exc)
         return False, None
     except Exception as exc:
-        logger.warning("Unexpected error checking resolution for %s: %s", condition_id, exc)
+        logger.warning("Unexpected error checking resolution for %s: %s", market_id, exc)
         return False, None
 
 
@@ -114,7 +115,7 @@ def resolve_pending_trades(db_path: str) -> int:
     resolved_count = 0
 
     for trade in trades:
-        resolved, yes_won = _fetch_resolution(trade["condition_id"])
+        resolved, yes_won = _fetch_resolution(trade["market_id"])
         if not resolved or yes_won is None:
             continue
 

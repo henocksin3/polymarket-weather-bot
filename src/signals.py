@@ -8,9 +8,11 @@ from datetime import date, datetime
 from config import (
     BANKROLL,
     KELLY_FRACTION,
+    MAX_FORECAST_PROB,
     MAX_POSITION_USD,
     MIN_CONFIDENCE,
     MIN_EDGE,
+    MIN_FORECAST_PROB,
 )
 from src.markets import WeatherMarket, parse_market_question
 from src.weather import EnsembleForecast, calculate_probability
@@ -157,6 +159,15 @@ def generate_signals(
                 logger.debug(
                     f"Probability calc failed for market {market.market_id}, "
                     f"bucket {i}: {exc}"
+                )
+                continue
+
+            # Skip extreme forecasts (0% or 100%) — too uncertain
+            if prob_result.probability < MIN_FORECAST_PROB or prob_result.probability > MAX_FORECAST_PROB:
+                logger.debug(
+                    f"Forecast probability {prob_result.probability:.1%} outside safe range "
+                    f"[{MIN_FORECAST_PROB:.1%}, {MAX_FORECAST_PROB:.1%}] — skipping "
+                    f"(market {market.market_id}, bucket {i})"
                 )
                 continue
 

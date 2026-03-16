@@ -122,9 +122,9 @@ class TelegramCommandHandler:
             Quick status summary.
         """
         try:
-            from src.database import get_accuracy_stats
-            from src.experiments import get_active_experiments
-            from src.learner import get_learning_params
+            from database import get_accuracy_stats
+            from experiments import get_active_experiments
+            from learner import get_learning_params
 
             import sqlite3
 
@@ -197,7 +197,7 @@ class TelegramCommandHandler:
             Full trading report.
         """
         try:
-            from src.reporter import generate_text_report
+            from reporter import generate_text_report
 
             report = generate_text_report(self.db_path, since_hours=24)
 
@@ -218,7 +218,7 @@ class TelegramCommandHandler:
             Active experiments and recent results.
         """
         try:
-            from src.experiments import get_active_experiments, get_recent_experiments
+            from experiments import get_active_experiments, get_recent_experiments
 
             active = get_active_experiments(self.db_path)
             recent = get_recent_experiments(self.db_path, days=7)
@@ -298,7 +298,7 @@ class TelegramCommandHandler:
             Calibration stats for all cities.
         """
         try:
-            from src.experiments import get_calibration_stats
+            from experiments import get_calibration_stats
             import config
 
             lines = [

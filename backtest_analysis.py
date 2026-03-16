@@ -18,8 +18,15 @@ class Trade:
     forecast_prob: float
     market_price: float
     size: float
-    outcome: str  # 'win', 'loss', or 'pending'
+    hit: int  # 1=win, 0=loss, None=pending
     pnl: float
+
+    @property
+    def outcome(self) -> str:
+        """Convert hit to outcome string."""
+        if self.hit is None:
+            return 'pending'
+        return 'win' if self.hit == 1 else 'loss'
 
 
 def load_trades(db_path: str) -> List[Trade]:
@@ -28,10 +35,10 @@ def load_trades(db_path: str) -> List[Trade]:
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT city, side, edge, forecast_prob, market_price, size, outcome, pnl
+        SELECT city, side, edge, forecast_prob, price, size, hit, pnl, created_at
         FROM trades
-        WHERE outcome IN ('win', 'loss')
-        ORDER BY timestamp ASC
+        WHERE resolved = 1 AND hit IS NOT NULL
+        ORDER BY created_at ASC
     """)
 
     trades = []
@@ -43,7 +50,7 @@ def load_trades(db_path: str) -> List[Trade]:
             forecast_prob=row[3],
             market_price=row[4],
             size=row[5],
-            outcome=row[6],
+            hit=row[6],
             pnl=row[7] if row[7] is not None else 0.0
         ))
 

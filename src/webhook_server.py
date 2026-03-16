@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from flask import Flask, request, jsonify
 
-from src.telegram_handler import TelegramCommandHandler
+from telegram_handler import TelegramCommandHandler
 
 # Setup logging
 logging.basicConfig(
@@ -214,9 +214,9 @@ def main():
     """Run the Flask webhook server."""
     # Initialize database tables
     try:
-        from src.database import create_tables
-        from src.experiments import create_experiment_tables
-        from src.learner import create_learning_tables
+        from database import create_tables
+        from experiments import create_experiment_tables
+        from learner import create_learning_tables
 
         logger.info("Initializing database tables...")
         create_tables(DB_PATH)

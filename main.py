@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 from datetime import datetime
 
@@ -279,6 +280,17 @@ def run_scan(dry_run: bool, clob_client) -> None:
     logger.info("=== Scan cycle complete ===")
 
 
+def _start_webhook_server():
+    """Start Flask webhook server in background thread."""
+    try:
+        from src.webhook_server import app
+        port = int(os.getenv("PORT", 8080))
+        logger.info("Starting Flask webhook server on port %d", port)
+        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    except Exception as exc:
+        logger.exception("Webhook server error: %s", exc)
+
+
 def main() -> None:
     args = _parse_args()
 
@@ -293,8 +305,17 @@ def main() -> None:
     create_learning_tables(config.DB_PATH)
     create_experiment_tables(config.DB_PATH)
 
-    # Note: Telegram commands now handled by webhook server (src/webhook_server.py)
-    # This script only runs trading logic
+    # Start webhook server in separate thread (only if running continuously)
+    webhook_thread = None
+    if not args.once:
+        logger.info("Starting webhook server in background thread...")
+        webhook_thread = threading.Thread(
+            target=_start_webhook_server,
+            daemon=True,
+            name="WebhookServer",
+        )
+        webhook_thread.start()
+        logger.info("Webhook server thread started")
 
     # Initialise CLOB client (only needed for live trading)
     clob_client = None if args.dry_run else _get_clob_client()

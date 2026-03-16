@@ -1,7 +1,10 @@
 """Flask webhook server for Telegram bot commands."""
 
-import logging
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import logging
 from typing import Any
 
 import httpx

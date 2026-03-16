@@ -10,30 +10,32 @@ logger = logging.getLogger(__name__)
 
 _CREATE_TRADES_SQL = """
 CREATE TABLE IF NOT EXISTS trades (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    market_id     TEXT    NOT NULL,
-    condition_id  TEXT    NOT NULL,
-    token_id      TEXT    NOT NULL,
-    question      TEXT    NOT NULL,
-    city          TEXT    NOT NULL,
-    trade_date    TEXT    NOT NULL,   -- ISO date YYYY-MM-DD
-    side          TEXT    NOT NULL,   -- YES or NO
-    size          REAL    NOT NULL,   -- USDC
-    price         REAL    NOT NULL,   -- limit price 0–1
-    edge          REAL    NOT NULL,
-    forecast_prob REAL    NOT NULL,
-    confidence    REAL    NOT NULL,
-    order_id      TEXT    DEFAULT '',
-    dry_run       INTEGER DEFAULT 0,  -- 1 if dry run
-    resolved      INTEGER DEFAULT 0,  -- 1 once market settles
-    hit           INTEGER DEFAULT NULL, -- 1=correct, 0=wrong, NULL=pending
-    pnl           REAL    DEFAULT 0.0,
-    created_at    TEXT    NOT NULL
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id          TEXT    NOT NULL,
+    condition_id       TEXT    NOT NULL,
+    token_id           TEXT    NOT NULL,
+    question           TEXT    NOT NULL,
+    city               TEXT    NOT NULL,
+    trade_date         TEXT    NOT NULL,   -- ISO date YYYY-MM-DD
+    side               TEXT    NOT NULL,   -- YES or NO
+    size               REAL    NOT NULL,   -- USDC
+    price              REAL    NOT NULL,   -- limit price 0–1
+    edge               REAL    NOT NULL,
+    forecast_prob      REAL    NOT NULL,
+    confidence         REAL    NOT NULL,
+    order_id           TEXT    DEFAULT '',
+    dry_run            INTEGER DEFAULT 0,  -- 1 if dry run
+    resolved           INTEGER DEFAULT 0,  -- 1 once market settles
+    hit                INTEGER DEFAULT NULL, -- 1=correct, 0=wrong, NULL=pending
+    pnl                REAL    DEFAULT 0.0,
+    experiment_variant TEXT    DEFAULT NULL, -- 'baseline', 'experiment', or NULL
+    created_at         TEXT    NOT NULL
 )
 """
 
 # Migration: add 'hit' column to existing databases that predate this schema
 _MIGRATE_HIT_COLUMN_SQL = "ALTER TABLE trades ADD COLUMN hit INTEGER DEFAULT NULL"
+_MIGRATE_EXPERIMENT_VARIANT_SQL = "ALTER TABLE trades ADD COLUMN experiment_variant TEXT DEFAULT NULL"
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -56,6 +58,12 @@ def create_tables(db_path: str) -> None:
             logger.info("Migrated trades table: added 'hit' column")
         except sqlite3.OperationalError:
             pass  # Column already exists
+        # Migration: add 'experiment_variant' column if missing
+        try:
+            con.execute(_MIGRATE_EXPERIMENT_VARIANT_SQL)
+            logger.info("Migrated trades table: added 'experiment_variant' column")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         con.commit()
         logger.debug("Database tables verified: %s", db_path)
     finally:
@@ -67,14 +75,16 @@ def log_trade(
     signal: Any,
     order_result: dict[str, Any] | None,
     dry_run: bool = False,
+    experiment_variant: str | None = None,
 ) -> int:
     """Insert a new trade row and return its row ID.
 
     Args:
-        db_path:      Path to the SQLite database file.
-        signal:       Signal dataclass (from src/signals.py).
-        order_result: Dict from place_order, or None for dry-run.
-        dry_run:      True if no real order was placed.
+        db_path:            Path to the SQLite database file.
+        signal:             Signal dataclass (from src/signals.py).
+        order_result:       Dict from place_order, or None for dry-run.
+        dry_run:            True if no real order was placed.
+        experiment_variant: 'baseline', 'experiment', or None.
 
     Returns:
         The auto-generated row ID of the inserted trade.
@@ -96,8 +106,9 @@ def log_trade(
             INSERT INTO trades
               (market_id, condition_id, token_id, question, city,
                trade_date, side, size, price, edge, forecast_prob,
-               confidence, order_id, dry_run, resolved, pnl, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0.0,?)
+               confidence, order_id, dry_run, resolved, pnl,
+               experiment_variant, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0.0,?,?)
             """,
             (
                 signal.market_id,
@@ -114,19 +125,23 @@ def log_trade(
                 round(signal.confidence, 6),
                 order_id,
                 int(dry_run),
+                experiment_variant,
                 datetime.now().isoformat(),
             ),
         )
         con.commit()
         row_id = cur.lastrowid
+
+        exp_info = f" [experiment:{experiment_variant}]" if experiment_variant else ""
         logger.info(
-            "Trade logged: id=%d %s %s size=%.2f price=%.4f edge=%.1f%%",
+            "Trade logged: id=%d %s %s size=%.2f price=%.4f edge=%.1f%%%s",
             row_id,
             signal.city,
             signal.recommended_side,
             signal.recommended_size,
             signal.market_price,
             signal.edge * 100,
+            exp_info,
         )
         return row_id
     finally:

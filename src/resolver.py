@@ -7,6 +7,7 @@ import httpx
 
 from config import GAMMA_API_BASE
 from src.database import get_unresolved_trades, mark_trade_resolved
+from src.experiments import record_experiment_result
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,25 @@ def resolve_pending_trades(db_path: str) -> int:
         )
         mark_trade_resolved(db_path, trade["id"], hit=hit, pnl=pnl)
         resolved_count += 1
+
+        # Record experiment result if this trade was part of an experiment
+        if trade.get("experiment_variant"):
+            try:
+                record_experiment_result(
+                    db_path,
+                    trade["city"],
+                    trade["experiment_variant"],
+                    hit,
+                )
+                logger.debug(
+                    "Recorded experiment result: %s variant=%s hit=%s",
+                    trade["city"],
+                    trade["experiment_variant"],
+                    hit,
+                )
+            except Exception as exc:
+                logger.warning("Failed to record experiment result: %s", exc)
+
         logger.info(
             "Trade #%d resolved — %s | %s → %s | pnl=$%+.2f | %s",
             trade["id"],

@@ -11,7 +11,14 @@ from datetime import datetime
 import config
 from src.alerts import send_telegram_alert
 from src.database import create_tables, get_accuracy_stats, log_trade
+from src.experiments import (
+    assign_experiment_variant,
+    create_experiment_tables,
+    run_experiment_cycle,
+)
+from src.learner import analyze_and_update_params, create_learning_tables
 from src.markets import fetch_weather_markets
+from src.reporter import save_report, send_telegram_report
 from src.resolver import resolve_pending_trades
 from src.risk import check_daily_limits
 from src.signals import generate_signals
@@ -146,12 +153,47 @@ def _get_clob_client():
 
 
 def run_scan(dry_run: bool, clob_client) -> None:
-    """Execute one full scan cycle: resolve → fetch → signal → trade → alert."""
+    """Execute one full scan cycle: resolve → learn → report → fetch → signal → trade → alert."""
     logger.info("=== Scan cycle starting (dry_run=%s) ===", dry_run)
 
     # 0. Resolve any previously logged trades that have now settled
     try:
-        resolve_pending_trades(config.DB_PATH)
+        resolved_count = resolve_pending_trades(config.DB_PATH)
+
+        # If trades were resolved, run learning and generate report
+        if resolved_count > 0:
+            logger.info("Running adaptive learning analysis...")
+            try:
+                summary = analyze_and_update_params(config.DB_PATH)
+                logger.info(
+                    "Learning complete: analyzed %d combinations, deactivated %d",
+                    summary["analyzed"],
+                    len(summary["deactivated"]),
+                )
+
+                # Run experiment cycle
+                logger.info("Running experiment cycle...")
+                try:
+                    exp_summary = run_experiment_cycle(config.DB_PATH)
+                    if exp_summary["started"]:
+                        logger.info(
+                            "Started %d new experiment(s): %s",
+                            len(exp_summary["started"]),
+                            [e["hypothesis"] for e in exp_summary["started"]],
+                        )
+                    if exp_summary["active"]:
+                        logger.info("%d active experiment(s)", len(exp_summary["active"]))
+                except Exception as exc:
+                    logger.warning("Experiment cycle error (non-fatal): %s", exc)
+
+                # Generate and save report
+                report_path = save_report(config.DB_PATH, since_hours=24)
+                logger.info("Report saved: %s", report_path)
+
+                # Send report to Telegram
+                send_telegram_report(config.DB_PATH, since_hours=24)
+            except Exception as exc:
+                logger.warning("Learning/reporting error (non-fatal): %s", exc)
     except Exception as exc:
         logger.warning("Resolver error (non-fatal): %s", exc)
 
@@ -219,8 +261,17 @@ def run_scan(dry_run: bool, clob_client) -> None:
                 except RuntimeError as exc:
                     logger.error("Order failed: %s", exc)
 
+        # Assign experiment variant if there's an active experiment for this city
+        experiment_variant = assign_experiment_variant(config.DB_PATH, signal.city)
+
         # Log to database (both dry-run and live)
-        log_trade(config.DB_PATH, signal, order_result, dry_run=dry_run)
+        log_trade(
+            config.DB_PATH,
+            signal,
+            order_result,
+            dry_run=dry_run,
+            experiment_variant=experiment_variant,
+        )
 
         # Send Telegram alert
         send_telegram_alert(signal, trade_result=order_result if not dry_run else None)
@@ -239,6 +290,11 @@ def main() -> None:
 
     # Ensure database is ready
     create_tables(config.DB_PATH)
+    create_learning_tables(config.DB_PATH)
+    create_experiment_tables(config.DB_PATH)
+
+    # Note: Telegram commands now handled by webhook server (src/webhook_server.py)
+    # This script only runs trading logic
 
     # Initialise CLOB client (only needed for live trading)
     clob_client = None if args.dry_run else _get_clob_client()
